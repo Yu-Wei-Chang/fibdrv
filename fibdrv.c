@@ -6,6 +6,7 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
+#include <linux/uaccess.h>
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -17,25 +18,42 @@ MODULE_VERSION("0.1");
 /* MAX_LENGTH is set to 92 because
  * ssize_t can't fit the number > 92
  */
-#define MAX_LENGTH 92
+#define MAX_LENGTH 100
 
 static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
 
-static long long fib_sequence(long long k)
+struct BigN {
+    unsigned long long lower, upper;
+};
+
+static inline void addBigN(struct BigN *output, struct BigN x, struct BigN y)
+{
+    output->upper = x.upper + y.upper;
+    if (y.lower > ~x.lower)
+        output->upper++;
+    output->lower = x.lower + y.lower;
+}
+
+static struct BigN fib_sequence(long long k)
 {
     /* FIXME: use clz/ctz and fast algorithms to speed up */
-    long long f[k + 2];
+    struct BigN f[k + 2];
 
-    f[0] = 0;
-    f[1] = 1;
+    f[0].lower = 0; /* f[0] = 0; */
+    f[0].upper = 0;
+
+    f[1].lower = 1; /* f[1] = 1; */
+    f[1].upper = 0;
 
     for (int i = 2; i <= k; i++) {
-        f[i] = f[i - 1] + f[i - 2];
+        addBigN(&f[i], f[i - 1], f[i - 2]);
     }
 
+    // pr_warn("offset [%llu], upper [%llu], lower [%llu]\n", k, f[k].upper,
+    //        f[k].lower);
     return f[k];
 }
 
@@ -60,7 +78,17 @@ static ssize_t fib_read(struct file *file,
                         size_t size,
                         loff_t *offset)
 {
-    return (ssize_t) fib_sequence(*offset);
+    struct BigN fib_seq;
+    if ((!buf) || (size < sizeof(fib_seq))) {
+        return -EINVAL;
+    }
+
+    fib_seq = fib_sequence(*offset);
+    if (copy_to_user(buf, &fib_seq, sizeof(fib_seq))) {
+        return -EFAULT;
+    }
+
+    return (ssize_t) sizeof(fib_seq);
 }
 
 /* write operation is skipped */
