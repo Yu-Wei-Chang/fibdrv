@@ -7,6 +7,7 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/uaccess.h>
+#include "bignum.h"
 
 MODULE_LICENSE("Dual MIT/GPL");
 MODULE_AUTHOR("National Cheng Kung University, Taiwan");
@@ -24,10 +25,7 @@ static dev_t fib_dev = 0;
 static struct cdev *fib_cdev;
 static struct class *fib_class;
 static DEFINE_MUTEX(fib_mutex);
-
-struct BigN {
-    unsigned long long lower, upper;
-};
+static ktime_t kt;
 
 static inline void addBigN(struct BigN *output, struct BigN x, struct BigN y)
 {
@@ -83,7 +81,11 @@ static ssize_t fib_read(struct file *file,
         return -EINVAL;
     }
 
+    kt = ktime_get();
     fib_seq = fib_sequence(*offset);
+    kt = ktime_sub(ktime_get(), kt);
+    fib_seq.fib_cost_time_ns = ktime_to_ns(kt);
+
     if (copy_to_user(buf, &fib_seq, sizeof(fib_seq))) {
         return -EFAULT;
     }

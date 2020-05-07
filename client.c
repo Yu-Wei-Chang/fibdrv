@@ -3,16 +3,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
+#include "bignum.h"
 
 #define FIB_DEV "/dev/fibonacci"
 
 /* Max. digits of BigN in decimal is 39. */
 #define LEN_BN_STR 40
 
-struct BigN {
-    unsigned long long lower, upper;
-};
+/* Output file name for plot */
+#define KERNEL_OUTPUT_FILE "kernel_cost.txt"
+#define USER_OUTPUT_FILE "user_cost.txt"
+
+static long timespec_diff(struct timespec *a, struct timespec *b)
+{
+    return ((b->tv_sec - a->tv_sec) * 1000000000) + (b->tv_nsec - a->tv_nsec);
+}
 
 /* Reverse given string */
 static void reverse_string(char *str)
@@ -165,6 +172,8 @@ int main()
     char fib_str_buf[LEN_BN_STR] = "";
     char write_buf[] = "testing writing";
     int offset = 100; /* TODO: try test something bigger than the limit */
+    FILE *k_fptr = NULL;
+    FILE *u_fptr = NULL;
 
     int fd = open(FIB_DEV, O_RDWR);
     if (fd < 0) {
@@ -177,11 +186,27 @@ int main()
         printf("Writing to " FIB_DEV ", returned the sequence %lld\n", sz);
     }
 
+    k_fptr = fopen(KERNEL_OUTPUT_FILE, "w+");
+    u_fptr = fopen(USER_OUTPUT_FILE, "w+");
+
     for (int i = 0; i <= offset; i++) {
+        struct timespec t1, t2;
+
         lseek(fd, i, SEEK_SET);
+        clock_gettime(CLOCK_REALTIME, &t1);
+
         if ((sz = read(fd, &bn_buf, sizeof(bn_buf))) < 0) {
             printf("Reading failed at offset %d\n", i);
         } else {
+            clock_gettime(CLOCK_REALTIME, &t2);
+
+            if (u_fptr)
+                fprintf(u_fptr, "%d %ld %lld\n", i, timespec_diff(&t1, &t2),
+                        timespec_diff(&t1, &t2) - bn_buf.fib_cost_time_ns);
+
+            if (k_fptr)
+                fprintf(k_fptr, "%d %lld\n", i, bn_buf.fib_cost_time_ns);
+
             print_BigN_string(bn_buf, fib_str_buf, sizeof(fib_str_buf));
             printf("Reading from " FIB_DEV
                    " at offset %d, returned the sequence "
@@ -189,6 +214,9 @@ int main()
                    i, fib_str_buf);
         }
     }
+
+    fclose(k_fptr);
+    fclose(u_fptr);
 
     for (int i = offset; i >= 0; i--) {
         lseek(fd, i, SEEK_SET);
