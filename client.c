@@ -205,7 +205,8 @@ int main()
                         timespec_diff(&t1, &t2) - bn_buf.fib_cost_time_ns);
 
             if (k_fptr)
-                fprintf(k_fptr, "%d %lld\n", i, bn_buf.fib_cost_time_ns);
+                fprintf(k_fptr, "%d %lld %lld\n", i, bn_buf.fib_cost_time_ns,
+                        bn_buf.fib_fd_cost_time_ns);
 
             print_BigN_string(bn_buf, fib_str_buf, sizeof(fib_str_buf));
             printf("Reading from " FIB_DEV

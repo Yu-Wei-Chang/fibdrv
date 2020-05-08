@@ -35,6 +35,79 @@ static inline void addBigN(struct BigN *output, struct BigN x, struct BigN y)
     output->lower = x.lower + y.lower;
 }
 
+static inline void multiBigN(struct BigN *output, struct BigN x, struct BigN y)
+{
+    size_t w = 8 * sizeof(unsigned long long);
+    struct BigN product = {.upper = 0, .lower = 0};
+
+    for (size_t i = 0; i < w; i++) {
+        if ((y.lower >> i) & 0x1) {
+            struct BigN tmp;
+
+            product.upper += x.upper << i;
+
+            tmp.lower = (x.lower << i);
+            tmp.upper = i == 0 ? 0 : (x.lower >> (w - i));
+            addBigN(&product, product, tmp);
+        }
+    }
+
+    for (size_t i = 0; i < w; i++) {
+        if ((y.upper >> i) & 0x1) {
+            product.upper += (x.lower << i);
+        }
+    }
+    output->upper = product.upper;
+    output->lower = product.lower;
+}
+
+static inline void subBigN(struct BigN *output, struct BigN x, struct BigN y)
+{
+    if ((x.upper >= y.upper) && (x.lower >= y.lower)) {
+        output->upper = x.upper - y.upper;
+        output->lower = x.lower - y.lower;
+    } else {
+        output->upper = x.upper - y.upper - 1;
+        output->lower = ULLONG_MAX + x.lower - y.lower + 1;
+    }
+}
+
+static struct BigN fib_sequence_fd(long long k)
+{
+    /* The position of the highest bit of k. */
+    /* So we need to loop `rounds` times to get the answer. */
+    int rounds = 0;
+    for (int i = k; i; ++rounds, i >>= 1)
+        ;
+
+    struct BigN t1 = {.upper = 0, .lower = 0}, t2 = {.upper = 0, .lower = 0};
+    struct BigN a = {.upper = 0, .lower = 0}, b = {.upper = 0, .lower = 1};
+    struct BigN multi_two = {.upper = 0, .lower = 2},
+                tmp = {.upper = 0, .lower = 0};
+
+    for (int i = rounds; i > 0; i--) {
+        // t1 = a * (2 * b - a); /* F(2k) = F(k)[2F(k+1) − F(k)] */
+        multiBigN(&t1, b, multi_two);
+        subBigN(&t1, t1, a);
+        multiBigN(&t1, a, t1);
+        // t2 = b * b + a * a;   /* F(2k+1) = F(k+1)^2 + F(k)^2 */
+        multiBigN(&t2, b, b);
+        multiBigN(&tmp, a, a);
+        addBigN(&t2, t2, tmp);
+
+        if ((k >> (i - 1)) & 1) {
+            a = t2; /* Threat F(2k+1) as F(k) next round. */
+            addBigN(&b, t1,
+                    t2); /* Threat F(2k) + F(2k+1) as F(k+1) next round. */
+        } else {
+            a = t1; /* Threat F(2k) as F(k) next round. */
+            b = t2; /* Threat F(2k+1) as F(k+1) next round. */
+        }
+    }
+
+    return a;
+}
+
 static struct BigN fib_sequence(long long k)
 {
     /* FIXME: use clz/ctz and fast algorithms to speed up */
@@ -77,14 +150,22 @@ static ssize_t fib_read(struct file *file,
                         loff_t *offset)
 {
     struct BigN fib_seq;
+    long long tmp_time_ns = 0;
+
     if ((!buf) || (size < sizeof(fib_seq))) {
         return -EINVAL;
     }
 
     kt = ktime_get();
+    fib_sequence_fd(*offset);
+    kt = ktime_sub(ktime_get(), kt);
+    tmp_time_ns = ktime_to_ns(kt);
+
+    kt = ktime_get();
     fib_seq = fib_sequence(*offset);
     kt = ktime_sub(ktime_get(), kt);
     fib_seq.fib_cost_time_ns = ktime_to_ns(kt);
+    fib_seq.fib_fd_cost_time_ns = tmp_time_ns;
 
     if (copy_to_user(buf, &fib_seq, sizeof(fib_seq))) {
         return -EFAULT;
